@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
 import Webcam from "react-webcam";
+import { useAuth } from "@/context/AuthContext";
 import {
   ISpeechRecognition,
   ISpeechRecognitionEvent,
@@ -14,10 +15,20 @@ import InterviewRecordingSection from "@/components/interview/InterviewRecording
 import { Mic, Sparkles, Lightbulb, Zap, CheckCircle2, Video } from "lucide-react";
 
 export default function InterviewSession({
-  interview,
+  interview: initialInterview,
   onInterviewUpdate,
 }: InterviewSessionProps) {
   const router = useRouter();
+  const { getToken } = useAuth();
+  
+  // Local state for interview data
+  const [interview, setInterview] = useState(initialInterview);
+  
+  // Update local state when initialInterview changes
+  useEffect(() => {
+    setInterview(initialInterview);
+  }, [initialInterview]);
+
   // State management
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
@@ -31,6 +42,7 @@ export default function InterviewSession({
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
+  const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
 
   // Refs
   const webcamRef = useRef<Webcam>(null);
@@ -199,9 +211,9 @@ export default function InterviewSession({
     if (!userAnswer.trim()) return false;
 
     try {
-      const token = localStorage.getItem("token");
+      const token = await getToken();
       if (!token) {
-        throw new Error("No authentication token found");
+        throw new Error("No authentication token found. Please log in again.");
       }
 
       const response = await fetch(`/api/interview/${interview._id}/answer`, {
@@ -223,9 +235,16 @@ export default function InterviewSession({
       }
 
       const data = await response.json();
+      
+      // Update the parent component with the latest interview data
       if (onInterviewUpdate && data.interview) {
         onInterviewUpdate(data.interview);
+        
+        // Update the local state with the latest interview data
+        // This ensures the UI is in sync with the server
+        setInterview(data.interview);
       }
+
       return true;
     } catch (err) {
       console.error("Error saving answer:", err);
@@ -242,19 +261,27 @@ export default function InterviewSession({
       return;
     }
 
-    setLoadingMessage("Uploading your recording...");
+    setLoadingMessage("Saving your answer...");
     setIsSubmitting(true);
 
-    const token = localStorage.getItem("token");
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-
     try {
+      // First, save the current answer with the video
+      const saved = await saveCurrentAnswer();
+      if (!saved) {
+        throw new Error("Failed to save your answer. Please try again.");
+      }
+
+      setLoadingMessage("Uploading your recording...");
+      
+      const token = await getToken();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
       // 2. Upload the video recording
       const formData = new FormData();
-      formData.append("video", videoBlob, `interview-${interview._id}.webm`);
+      formData.append("video", videoBlob, `interview-${interview._id}-final.webm`);
 
       const uploadRes = await fetch(
         `/api/interview/${interview._id}/upload-recording`,
@@ -317,7 +344,7 @@ export default function InterviewSession({
       if (videoBlob && !videoUrl) {
         setIsUploadingVideo(true);
         try {
-          const token = localStorage.getItem("token");
+          const token = await getToken();
           if (!token) {
             throw new Error("No authentication token found");
           }
@@ -352,7 +379,7 @@ export default function InterviewSession({
       // Save the answer with the video URL
       await saveCurrentAnswer();
 
-      // Move to next question or complete interview
+      // Move to next question or show submit confirmation
       const nextIndex = currentIndex + 1;
       if (nextIndex < interview.questions.length) {
         setCurrentIndex(nextIndex);
@@ -360,7 +387,8 @@ export default function InterviewSession({
         setVideoBlob(null);
         setVideoUrl(null);
       } else {
-        await handleCompleteInterview();
+        // Show confirmation dialog instead of directly submitting
+        setShowSubmitConfirmation(true);
       }
     } catch (err) {
       console.error("Error submitting answer:", err);
@@ -379,8 +407,48 @@ export default function InterviewSession({
     return <div className="p-6 text-white">No questions found in this interview.</div>;
   }
 
+  // Handle confirmation dialog actions
+  const handleConfirmSubmit = async () => {
+    setShowSubmitConfirmation(false);
+    try {
+      await handleCompleteInterview();
+    } catch (error) {
+      console.error("Error completing interview:", error);
+      setError(error instanceof Error ? error.message : "An error occurred while submitting the interview.");
+    }
+  };
+
+  const handleCancelSubmit = () => {
+    setShowSubmitConfirmation(false);
+  };
+
   return (
     <div className="flex flex-col gap-6 p-6 text-white bg-[var(--input-bg)]/30 rounded-lg shadow-sm">
+      {/* Submit Confirmation Dialog */}
+      {showSubmitConfirmation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-[var(--card-bg)] p-6 rounded-lg max-w-md w-full mx-4">
+            <h3 className="text-xl font-bold mb-4">Submit Interview</h3>
+            <p className="mb-6">Are you sure you want to submit your interview? You won't be able to make changes after submission.</p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={handleCancelSubmit}
+                className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                disabled={isSubmitting}
+              >
+                Review Answers
+              </button>
+              <button
+                onClick={handleConfirmSubmit}
+                className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-blue-500 rounded-md hover:opacity-90 transition-opacity disabled:opacity-50"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Submitting...' : 'Submit Interview'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Navigation and progress */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-400">
