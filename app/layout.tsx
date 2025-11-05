@@ -3,6 +3,7 @@ import "./globals.css";
 import localfont from "next/font/local";
 import { Metadata } from "next";
 import Image from "next/image";
+import Script from "next/script";
 import NavBarWrapper from "@/components/NavBarWrapper";
 import { AuthProvider } from "@/context/AuthContext";
 
@@ -68,6 +69,16 @@ export default function RootLayout({
           <NavBarWrapper />
           {children}
         </AuthProvider>
+        
+        {/* Botpress Chatbot Scripts */}
+        <Script 
+          src="https://cdn.botpress.cloud/webchat/v3.3/inject.js"
+          strategy="afterInteractive"
+        />
+        <Script 
+          src="https://files.bpcontent.cloud/2025/04/19/09/20250419094324-XVRD1UY2.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
