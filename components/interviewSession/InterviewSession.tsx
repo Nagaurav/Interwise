@@ -56,7 +56,11 @@ export default function InterviewSession({
         const firstUnansweredIndex = interview.questions.findIndex(
           (q) => !q.answer || q.answer.trim() === ""
         );
-        const newIndex = firstUnansweredIndex === -1 ? 0 : firstUnansweredIndex;
+        
+        // BUGFIX: If all answered (-1), go to LAST question, not first (0).
+        const newIndex = firstUnansweredIndex === -1
+          ? interview.questions.length - 1
+          : firstUnansweredIndex;
         setCurrentIndex(newIndex);
         setUserAnswer(interview.questions[newIndex]?.answer || "");
       } catch (err) {
@@ -173,7 +177,6 @@ export default function InterviewSession({
       timeRef.current = null;
     }
     setIsRecording(false);
-    setTranscript("");
   };
 
   // Format recording time

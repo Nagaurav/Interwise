@@ -17,10 +17,11 @@ const InterviewRecorder = ({
   const [isRecording, setIsRecording] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const timerRef = useRef<NodeJS.Timeout>();
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
   // Cleanup on unmount
@@ -44,33 +45,71 @@ const InterviewRecorder = ({
 
       streamRef.current = stream;
       
-      // Set up video preview
+      // Set up video preview with error handling
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(console.error);
+        try {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        } catch (playError) {
+          console.warn("Video play failed:", playError);
+          // Try alternative approach for older browsers
+          if (videoRef.current) {
+            videoRef.current.load();
+            videoRef.current.play().catch(err => {
+              console.error("Video play still failed:", err);
+              if (onError) onError("Could not start video preview. Recording will still work.");
+            });
+          }
+        }
       }
 
-      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-        ? "video/webm;codecs=vp9"
-        : "video/webm";
+      // More robust codec selection
+      let mimeType = "video/webm";
+      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")) {
+        mimeType = "video/webm;codecs=vp9,opus";
+      } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")) {
+        mimeType = "video/webm;codecs=vp8,opus";
+      } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+        mimeType = "video/webm;codecs=vp9";
+      } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+        mimeType = "video/webm;codecs=vp8";
+      } else if (MediaRecorder.isTypeSupported("video/mp4")) {
+        mimeType = "video/mp4";
+      }
 
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
+        console.log('Data available:', { size: e.data.size, type: e.data.type });
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
         }
       };
 
       mediaRecorder.onstop = async () => {
-        if (chunksRef.current.length === 0) return;
-
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        chunksRef.current = [];
+        console.log('MediaRecorder stopped, chunks count:', chunksRef.current.length);
         
-        if (onStop) {
-          onStop(blob);
+        if (chunksRef.current.length === 0) {
+          console.warn('No video chunks recorded');
+          if (onError) onError('No video data was recorded. Please try again.');
+          return;
+        }
+
+        try {
+          const blob = new Blob(chunksRef.current, { type: mimeType });
+          console.log('Video blob created:', { size: blob.size, type: blob.type });
+          chunksRef.current = [];
+          
+          if (onStop) {
+            console.log('Calling onStop with blob');
+            onStop(blob);
+          } else {
+            console.warn('No onStop callback provided');
+          }
+        } catch (error) {
+          console.error('Error creating video blob:', error);
+          if (onError) onError('Failed to process recorded video. Please try again.');
         }
       };
 
@@ -93,19 +132,35 @@ const InterviewRecorder = ({
   };
 
   const stopRecording = () => {
+    console.log('Stopping recording...');
+    
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      console.log('MediaRecorder state:', mediaRecorderRef.current.state);
+      
+      // Stop the media recorder first
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
 
-      // Stop all tracks in the stream
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
+      // Clean up video element and stream after a short delay
+      // to allow the onstop event to fire
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
+        
+        // Stop all tracks in the stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+      }, 100);
+    } else {
+      console.warn('MediaRecorder not active or not available');
     }
   };
 
@@ -153,6 +208,12 @@ const InterviewRecorder = ({
             Camera/microphone access is required to record the interview.
           </p>
         )}
+        
+        {error && (
+          <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md dark:bg-red-900/30 dark:text-red-400">
+            {error}
+          </div>
+        )}
       </div>
 
       <div className="relative w-full max-w-3xl mx-auto bg-black rounded-lg overflow-hidden">
@@ -161,6 +222,14 @@ const InterviewRecorder = ({
           className={`w-full ${!isRecording && !hasPermission ? 'h-64' : ''} object-cover`}
           muted
           playsInline
+          onError={(e) => {
+            console.error("Video element error:", e);
+            if (onError) onError("Video display error. Please try refreshing the page.");
+          }}
+          onLoadStart={() => {
+            // Clear any previous errors when loading starts
+            setError(null);
+          }}
         />
         {!isRecording && hasPermission !== false && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">

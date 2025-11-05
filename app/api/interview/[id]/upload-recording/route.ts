@@ -9,7 +9,7 @@ import { JwtPayload } from 'jsonwebtoken';
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 1. Get and verify the authorization token
@@ -36,7 +36,7 @@ export async function POST(
     }
 
     // 2. Validate interview ID
-    const interviewId = params.id;
+    const { id: interviewId } = await params;
     if (!Types.ObjectId.isValid(interviewId)) {
       return NextResponse.json(
         { error: 'Invalid interview ID' },
@@ -74,9 +74,8 @@ export async function POST(
     
     // 6. Upload to S3
     const fileBuffer = Buffer.from(await file.arrayBuffer());
-    const fileToUpload = new File([fileBuffer], fileKey, { type: file.type });
     
-    const publicUrl = await uploadToS3(fileToUpload, fileKey);
+    const publicUrl = await uploadToS3(fileBuffer, fileKey, file.type);
 
     // 7. Update interview with recording details
     interview.recording = {

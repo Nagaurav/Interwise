@@ -24,9 +24,14 @@ const InterviewRecordingSection = ({
   const [videoUrl, setVideoUrl] = useState<string | null>(initialVideoUrl);
   const [error, setError] = useState<string | null>(null);
 
+  // Debug logging for state changes
+  console.log('InterviewRecordingSection render:', { mode, videoUrl, recordingBlob: !!recordingBlob, error });
+
   const handleRecordingComplete = useCallback((blob: Blob) => {
+    console.log('Recording complete, blob received:', { size: blob.size, type: blob.type });
     setRecordingBlob(blob);
     const url = URL.createObjectURL(blob);
+    console.log('Video URL created:', url);
     setVideoUrl(url);
     onRecordingComplete(blob, url);
   }, [onRecordingComplete]);
@@ -48,12 +53,18 @@ const InterviewRecordingSection = ({
   }, [recordingBlob, videoUrl, onRecordingComplete]);
 
   if (videoUrl) {
+    console.log('Rendering video with URL:', videoUrl);
     return (
       <div className={`relative ${className}`}>
         <video
           src={videoUrl}
           controls
           className="w-full max-w-3xl mx-auto rounded-lg shadow-lg"
+          onLoadedData={() => console.log('Video loaded successfully')}
+          onError={(e) => {
+            console.error('Video playback error:', e);
+            setError('Failed to load recorded video. Please try recording again.');
+          }}
         />
         <button
           onClick={handleRemoveVideo}

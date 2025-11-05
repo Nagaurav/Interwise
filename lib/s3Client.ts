@@ -9,12 +9,12 @@ const s3Client = new S3Client({
   },
 });
 
-export async function uploadToS3(file: File, key: string) {
+export async function uploadToS3(fileBuffer: Buffer, key: string, contentType: string) {
   const params = {
     Bucket: process.env.AWS_S3_BUCKET_NAME,
     Key: key,
-    Body: file,
-    ContentType: file.type,
+    Body: fileBuffer,
+    ContentType: contentType,
   };
 
   try {
